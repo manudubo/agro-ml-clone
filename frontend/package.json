@@ -8,6 +8,10 @@
     "build": "ng build",
     "watch": "ng build --watch --configuration development",
     "test": "ng test",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:report": "playwright show-report",
+    "test:e2e:pdf": "node e2e/utils/generate-pdf-report.js",
     "lint": "ng lint",
     "start:docker": "ng serve --host 0.0.0.0 --port 4200"
   },
@@ -46,6 +50,9 @@
     "autoprefixer": "^10.4.17",
     "postcss": "^8.4.33",
     "@tailwindcss/forms": "^0.5.7",
-    "@tailwindcss/typography": "^0.5.10"
+    "@tailwindcss/typography": "^0.5.10",
+    "@playwright/test": "^1.48.0",
+    "pdfkit": "^0.15.0",
+    "playwright-html-reporter": "^1.1.0"
   }
 }
