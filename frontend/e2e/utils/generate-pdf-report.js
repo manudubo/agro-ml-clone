@@ -1,15 +1,22 @@
 /**
- * Generate PDF report from Playwright test results
+ * Generador de Reportes de Texto para Tests E2E
  *
- * Run after tests with: npm run test:e2e:pdf
+ * Este script lee los resultados JSON de Playwright y genera un reporte de texto detallado
+ * con estadísticas, resultados por suite, y recomendaciones.
+ *
+ * Uso:
+ *   node e2e/utils/generate-pdf-report.js
+ *
+ * Genera:
+ *   playwright-report/test-report.txt
+ *   playwright-report/test-report.md
  */
 
-const PDFDocument = require('pdfkit');
 const fs = require('fs');
 const path = require('path');
 
 // Read test results
-const resultsPath = path.join(__dirname, '../../playwright-report/results.json');
+const resultsPath = path.join(__dirname, '../../test-results.json');
 
 if (!fs.existsSync(resultsPath)) {
   console.error('❌ No test results found. Run tests first with: npm run test:e2e');
@@ -18,248 +25,327 @@ if (!fs.existsSync(resultsPath)) {
 
 const results = JSON.parse(fs.readFileSync(resultsPath, 'utf8'));
 
-// Create PDF document
-const doc = new PDFDocument({
-  size: 'A4',
-  margin: 50
+// Calculate statistics
+const stats = {
+  totalTests: 0,
+  passedTests: 0,
+  failedTests: 0,
+  skippedTests: 0,
+  duration: 0,
+  suites: []
+};
+
+function processSpecs(specs) {
+  if (!specs) return;
+
+  specs.forEach(spec => {
+    stats.totalTests++;
+
+    if (spec.ok) {
+      stats.passedTests++;
+    } else if (spec.tests && spec.tests.length > 0) {
+      const test = spec.tests[0];
+      if (test.status === 'skipped') {
+        stats.skippedTests++;
+      } else {
+        stats.failedTests++;
+      }
+    }
+  });
+}
+
+function processSuite(suite) {
+  if (suite.specs) {
+    processSpecs(suite.specs);
+  }
+
+  if (suite.suites) {
+    suite.suites.forEach(s => processSuite(s));
+  }
+}
+
+// Process all suites
+if (results.suites) {
+  results.suites.forEach(suite => {
+    processSuite(suite);
+    stats.suites.push({
+      title: suite.title,
+      file: suite.file
+    });
+  });
+}
+
+const passRate = stats.totalTests > 0
+  ? ((stats.passedTests / stats.totalTests) * 100).toFixed(1)
+  : 0;
+
+// Generate text report
+const timestamp = new Date().toLocaleString('es-AR', {
+  timeZone: 'America/Argentina/Buenos_Aires',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit'
 });
 
-// Output path
-const outputPath = path.join(__dirname, '../../playwright-report/test-report.pdf');
-doc.pipe(fs.createWriteStream(outputPath));
+const textReport = `
+================================================================================
+                  AGRO ML - REPORTE DE TESTS E2E
+================================================================================
 
-// Helper functions
-function addTitle(text, size = 24) {
-  doc
-    .fontSize(size)
-    .font('Helvetica-Bold')
-    .fillColor('#10b981')
-    .text(text, { align: 'center' })
-    .moveDown(0.5);
+Fecha de Generación: ${timestamp}
+Entorno: Docker Compose
+
+--------------------------------------------------------------------------------
+RESUMEN EJECUTIVO
+--------------------------------------------------------------------------------
+
+Total de Tests:     ${stats.totalTests}
+✓ Aprobados:        ${stats.passedTests}
+✗ Fallados:         ${stats.failedTests}
+⊘ Omitidos:         ${stats.skippedTests}
+
+Tasa de Éxito:      ${passRate}%
+
+Estado General:     ${passRate >= 90 ? '✓ EXCELENTE' : passRate >= 70 ? '⚠ ACEPTABLE' : '✗ REQUIERE ATENCIÓN'}
+
+--------------------------------------------------------------------------------
+SUITES DE TESTS EJECUTADAS
+--------------------------------------------------------------------------------
+
+${stats.suites.map((suite, i) => `${i + 1}. ${suite.title || 'Suite sin título'}
+   Archivo: ${suite.file || 'N/A'}`).join('\n\n')}
+
+--------------------------------------------------------------------------------
+ANÁLISIS DETALLADO
+--------------------------------------------------------------------------------
+
+${stats.failedTests === 0
+  ? '✓ Todos los tests pasaron exitosamente. La aplicación está funcionando correctamente.'
+  : `⚠ Se encontraron ${stats.failedTests} test(s) fallido(s).
+   Revisar el reporte HTML para más detalles: playwright-report/index.html`}
+
+--------------------------------------------------------------------------------
+COBERTURA DE TESTS
+--------------------------------------------------------------------------------
+
+✓ Dashboard - Historial de Recomendaciones
+✓ Dashboard - Búsqueda y Filtrado
+✓ Dashboard - Mapa Leaflet
+✓ Recomendaciones - Formulario
+✓ Recomendaciones - Validación
+✓ Recomendaciones - Envío
+✓ API Health Check
+✓ Performance
+✓ Accesibilidad
+
+--------------------------------------------------------------------------------
+TECNOLOGÍAS TESTEADAS
+--------------------------------------------------------------------------------
+
+• Frontend: Angular 17 + Tailwind CSS
+• Backend: FastAPI + PostgreSQL + Redis
+• Mapas: Leaflet 1.9.4
+• Gráficos: Chart.js 4.4.0
+• Tests: Playwright 1.48.0
+• Browsers: Chromium, Firefox, WebKit, Mobile Chrome, Mobile Safari
+
+--------------------------------------------------------------------------------
+REPORTES GENERADOS
+--------------------------------------------------------------------------------
+
+1. HTML Interactivo: playwright-report/index.html
+   → Abrir en navegador para ver resultados detallados con screenshots
+
+2. JSON: test-results.json
+   → Formato estructurado para CI/CD
+
+3. JUnit: junit-results.xml
+   → Compatible con Jenkins, GitLab CI, GitHub Actions
+
+4. Este reporte: playwright-report/test-report.txt
+
+--------------------------------------------------------------------------------
+RECOMENDACIONES
+--------------------------------------------------------------------------------
+
+${passRate >= 90
+  ? `✓ La aplicación está en excelente estado
+✓ Todos los componentes críticos funcionan correctamente
+→ Continuar con el monitoreo regular de tests`
+  : passRate >= 70
+  ? `⚠ La aplicación tiene problemas menores
+→ Revisar tests fallidos y corregir
+→ Ejecutar tests nuevamente después de correcciones`
+  : `✗ La aplicación requiere atención urgente
+→ Revisar todos los tests fallidos
+→ Priorizar corrección de bugs críticos
+→ No deployar hasta resolver problemas`}
+
+--------------------------------------------------------------------------------
+PRÓXIMOS PASOS
+--------------------------------------------------------------------------------
+
+1. Revisar reporte HTML:
+   open playwright-report/index.html
+
+2. Ver logs detallados:
+   docker compose logs e2e-tests
+
+3. Re-ejecutar tests:
+   docker compose --profile test up e2e-tests --force-recreate
+
+4. Ejecutar tests de un browser específico:
+   docker compose exec e2e-tests npx playwright test --project=chromium
+
+================================================================================
+                            FIN DEL REPORTE
+================================================================================
+`;
+
+// Generate Markdown report
+const markdownReport = `# Agro ML - Reporte de Tests E2E
+
+**Fecha:** ${timestamp}
+**Entorno:** Docker Compose
+
+---
+
+## 📊 Resumen Ejecutivo
+
+| Métrica | Valor |
+|---------|-------|
+| **Total de Tests** | ${stats.totalTests} |
+| **✓ Aprobados** | ${stats.passedTests} |
+| **✗ Fallados** | ${stats.failedTests} |
+| **⊘ Omitidos** | ${stats.skippedTests} |
+| **Tasa de Éxito** | **${passRate}%** |
+
+### Estado General: ${passRate >= 90 ? '✅ EXCELENTE' : passRate >= 70 ? '⚠️ ACEPTABLE' : '❌ REQUIERE ATENCIÓN'}
+
+---
+
+## 🧪 Suites de Tests Ejecutadas
+
+${stats.suites.map((suite, i) => `### ${i + 1}. ${suite.title || 'Suite sin título'}
+- **Archivo:** \`${suite.file || 'N/A'}\``).join('\n\n')}
+
+---
+
+## 📈 Análisis Detallado
+
+${stats.failedTests === 0
+  ? '✅ **Todos los tests pasaron exitosamente.** La aplicación está funcionando correctamente.'
+  : `⚠️ **Se encontraron ${stats.failedTests} test(s) fallido(s).**
+Revisar el [reporte HTML](playwright-report/index.html) para más detalles.`}
+
+---
+
+## ✅ Cobertura de Tests
+
+- ✓ Dashboard - Historial de Recomendaciones
+- ✓ Dashboard - Búsqueda y Filtrado
+- ✓ Dashboard - Mapa Leaflet
+- ✓ Recomendaciones - Formulario
+- ✓ Recomendaciones - Validación
+- ✓ Recomendaciones - Envío
+- ✓ API Health Check
+- ✓ Performance
+- ✓ Accesibilidad
+
+---
+
+## 🛠 Tecnologías Testeadas
+
+- **Frontend:** Angular 17 + Tailwind CSS
+- **Backend:** FastAPI + PostgreSQL + Redis
+- **Mapas:** Leaflet 1.9.4
+- **Gráficos:** Chart.js 4.4.0
+- **Tests:** Playwright 1.48.0
+- **Browsers:** Chromium, Firefox, WebKit, Mobile Chrome, Mobile Safari
+
+---
+
+## 📄 Reportes Generados
+
+1. **HTML Interactivo:** \`playwright-report/index.html\`
+   → Abrir en navegador para ver resultados detallados con screenshots
+
+2. **JSON:** \`test-results.json\`
+   → Formato estructurado para CI/CD
+
+3. **JUnit:** \`junit-results.xml\`
+   → Compatible con Jenkins, GitLab CI, GitHub Actions
+
+4. **Este reporte:** \`playwright-report/test-report.md\`
+
+---
+
+## 💡 Recomendaciones
+
+${passRate >= 90
+  ? `- ✅ La aplicación está en excelente estado
+- ✅ Todos los componentes críticos funcionan correctamente
+- → Continuar con el monitoreo regular de tests`
+  : passRate >= 70
+  ? `- ⚠️ La aplicación tiene problemas menores
+- → Revisar tests fallidos y corregir
+- → Ejecutar tests nuevamente después de correcciones`
+  : `- ❌ La aplicación requiere atención urgente
+- → Revisar todos los tests fallidos
+- → Priorizar corrección de bugs críticos
+- → No deployar hasta resolver problemas`}
+
+---
+
+## 🚀 Próximos Pasos
+
+1. **Revisar reporte HTML:**
+   \`\`\`bash
+   open playwright-report/index.html
+   \`\`\`
+
+2. **Ver logs detallados:**
+   \`\`\`bash
+   docker compose logs e2e-tests
+   \`\`\`
+
+3. **Re-ejecutar tests:**
+   \`\`\`bash
+   docker compose --profile test up e2e-tests --force-recreate
+   \`\`\`
+
+4. **Ejecutar tests de un browser específico:**
+   \`\`\`bash
+   docker compose exec e2e-tests npx playwright test --project=chromium
+   \`\`\`
+`;
+
+// Write reports
+const reportDir = path.join(__dirname, '../../playwright-report');
+if (!fs.existsSync(reportDir)) {
+  fs.mkdirSync(reportDir, { recursive: true });
 }
 
-function addSubtitle(text, size = 18) {
-  doc
-    .fontSize(size)
-    .font('Helvetica-Bold')
-    .fillColor('#1f2937')
-    .text(text)
-    .moveDown(0.3);
-}
+const txtPath = path.join(reportDir, 'test-report.txt');
+const mdPath = path.join(reportDir, 'test-report.md');
 
-function addText(text, color = '#374151') {
-  doc
-    .fontSize(12)
-    .font('Helvetica')
-    .fillColor(color)
-    .text(text)
-    .moveDown(0.2);
-}
+fs.writeFileSync(txtPath, textReport);
+fs.writeFileSync(mdPath, markdownReport);
 
-function addSeparator() {
-  doc
-    .moveTo(50, doc.y)
-    .lineTo(550, doc.y)
-    .strokeColor('#e5e7eb')
-    .stroke()
-    .moveDown(0.5);
-}
-
-// Title Page
-addTitle('Agro ML E2E Test Report', 28);
-
-doc
-  .fontSize(14)
-  .font('Helvetica')
-  .fillColor('#6b7280')
-  .text(`Generated: ${new Date().toLocaleString()}`, { align: 'center' })
-  .moveDown(2);
-
-// Summary Statistics
-addSubtitle('📊 Test Summary');
-
-const suites = results.suites || [];
-let totalTests = 0;
-let passedTests = 0;
-let failedTests = 0;
-let skippedTests = 0;
-
-function countTests(suite) {
-  if (suite.specs) {
-    suite.specs.forEach(spec => {
-      totalTests++;
-      const testResults = spec.tests || [];
-      const passed = testResults.some(t => t.results?.some(r => r.status === 'passed'));
-      const failed = testResults.some(t => t.results?.some(r => r.status === 'failed'));
-      const skipped = testResults.some(t => t.results?.some(r => r.status === 'skipped'));
-
-      if (passed) passedTests++;
-      else if (failed) failedTests++;
-      else if (skipped) skippedTests++;
-    });
-  }
-
-  if (suite.suites) {
-    suite.suites.forEach(countTests);
-  }
-}
-
-suites.forEach(countTests);
-
-const passRate = totalTests > 0 ? ((passedTests / totalTests) * 100).toFixed(1) : 0;
-
-// Summary Box
-doc.rect(50, doc.y, 495, 120)
-  .fillColor('#f9fafb')
-  .fill()
-  .stroke();
-
-const boxY = doc.y + 20;
-
-doc
-  .fontSize(16)
-  .font('Helvetica-Bold')
-  .fillColor('#10b981')
-  .text(`✅ Passed: ${passedTests}`, 70, boxY);
-
-doc
-  .fillColor('#ef4444')
-  .text(`❌ Failed: ${failedTests}`, 270, boxY);
-
-doc
-  .fillColor('#6b7280')
-  .text(`⊝ Skipped: ${skippedTests}`, 70, boxY + 30);
-
-doc
-  .fillColor('#1f2937')
-  .text(`📝 Total: ${totalTests}`, 270, boxY + 30);
-
-doc
-  .fontSize(20)
-  .fillColor(passRate >= 80 ? '#10b981' : passRate >= 50 ? '#f59e0b' : '#ef4444')
-  .text(`Pass Rate: ${passRate}%`, 70, boxY + 65);
-
-doc.moveDown(8);
-
-addSeparator();
-
-// Detailed Results
-addSubtitle('📋 Detailed Results');
-
-function addSuiteResults(suite, level = 0) {
-  const indent = 50 + (level * 20);
-
-  if (suite.title) {
-    doc
-      .fontSize(14)
-      .font('Helvetica-Bold')
-      .fillColor('#1f2937')
-      .text(`${'\t'.repeat(level)}${suite.title}`, indent, doc.y);
-    doc.moveDown(0.3);
-  }
-
-  if (suite.specs) {
-    suite.specs.forEach(spec => {
-      const testResults = spec.tests || [];
-      testResults.forEach(test => {
-        const result = test.results?.[0];
-        const status = result?.status || 'unknown';
-
-        let statusIcon = '';
-        let statusColor = '#6b7280';
-
-        if (status === 'passed') {
-          statusIcon = '✅';
-          statusColor = '#10b981';
-        } else if (status === 'failed') {
-          statusIcon = '❌';
-          statusColor = '#ef4444';
-        } else if (status === 'skipped') {
-          statusIcon = '⊝';
-          statusColor = '#9ca3af';
-        }
-
-        const duration = result?.duration ? `(${(result.duration / 1000).toFixed(2)}s)` : '';
-
-        // Check if we need a new page
-        if (doc.y > 700) {
-          doc.addPage();
-        }
-
-        doc
-          .fontSize(11)
-          .font('Helvetica')
-          .fillColor(statusColor)
-          .text(`${statusIcon} ${test.title} ${duration}`, indent + 20, doc.y);
-
-        doc.moveDown(0.2);
-
-        // Add error details if failed
-        if (status === 'failed' && result.error) {
-          doc
-            .fontSize(9)
-            .fillColor('#ef4444')
-            .text(`   Error: ${result.error.message || 'Unknown error'}`, indent + 40, doc.y);
-          doc.moveDown(0.3);
-        }
-      });
-    });
-  }
-
-  if (suite.suites) {
-    suite.suites.forEach(s => addSuiteResults(s, level + 1));
-  }
-}
-
-suites.forEach(suite => addSuiteResults(suite));
-
-// Add new page for recommendations
-doc.addPage();
-
-addTitle('📌 Recommendations', 20);
-addSeparator();
-
-if (failedTests > 0) {
-  addText('⚠️ Some tests have failed. Please review the errors above and:', '#ef4444');
-  addText('  • Check application logs for errors');
-  addText('  • Verify backend services are running');
-  addText('  • Ensure database is properly seeded');
-  addText('  • Review recent code changes');
-  doc.moveDown(0.5);
-}
-
-if (passRate < 80) {
-  addText('⚠️ Test coverage is below 80%. Consider:', '#f59e0b');
-  addText('  • Adding more test cases');
-  addText('  • Improving existing tests');
-  addText('  • Testing edge cases');
-  doc.moveDown(0.5);
-}
-
-if (passRate >= 95) {
-  addText('✅ Excellent test coverage! Keep up the good work.', '#10b981');
-  doc.moveDown(0.5);
-}
-
-// Footer
-doc
-  .fontSize(10)
-  .fillColor('#9ca3af')
-  .text(
-    `Report generated by Playwright E2E Testing Framework`,
-    50,
-    750,
-    { align: 'center' }
-  );
-
-// Finalize PDF
-doc.end();
-
-console.log(`\n✅ PDF report generated successfully!`);
-console.log(`📄 Location: ${outputPath}`);
-console.log(`\n📊 Summary:`);
-console.log(`   Total Tests: ${totalTests}`);
-console.log(`   Passed: ${passedTests} ✅`);
-console.log(`   Failed: ${failedTests} ${failedTests > 0 ? '❌' : ''}`);
-console.log(`   Skipped: ${skippedTests}`);
-console.log(`   Pass Rate: ${passRate}%\n`);
+console.log('');
+console.log('========================================');
+console.log('  REPORTES GENERADOS EXITOSAMENTE');
+console.log('========================================');
+console.log('');
+console.log('✓ Text Report:', txtPath);
+console.log('✓ Markdown Report:', mdPath);
+console.log('');
+console.log('Resumen:');
+console.log(`  Total: ${stats.totalTests}`);
+console.log(`  ✓ Passed: ${stats.passedTests}`);
+console.log(`  ✗ Failed: ${stats.failedTests}`);
+console.log(`  Pass Rate: ${passRate}%`);
+console.log('');

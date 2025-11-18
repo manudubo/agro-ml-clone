@@ -47,6 +47,32 @@ services:
     volumes:
       - ./frontend:/app
       - /app/node_modules
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4200"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+
+  e2e-tests:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.e2e
+    image: agro-ml-e2e:latest
+    depends_on:
+      frontend:
+        condition: service_healthy
+    environment:
+      - FRONTEND_URL=http://frontend:4200
+      - BACKEND_URL=http://backend:8000
+      - KEEP_ALIVE=false
+    volumes:
+      - ./frontend/playwright-report:/app/playwright-report
+      - ./frontend/test-results:/app/test-results
+      - ./frontend/test-results.json:/app/test-results.json
+      - ./frontend/junit-results.xml:/app/junit-results.xml
+    profiles:
+      - test  # Solo se ejecuta con: docker compose --profile test up
 
   postgres:
     image: postgis/postgis:16-3.4  # Upgraded to latest stable

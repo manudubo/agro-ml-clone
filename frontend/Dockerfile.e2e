@@ -1,0 +1,22 @@
+# Dockerfile para E2E Tests con Playwright
+FROM mcr.microsoft.com/playwright:v1.48.0-jammy
+
+WORKDIR /app
+
+# Copiar archivos de configuración
+COPY package*.json ./
+COPY playwright.config.ts ./
+COPY tsconfig*.json ./
+
+# Instalar dependencias
+RUN npm ci
+
+# Copiar código fuente y tests
+COPY e2e ./e2e
+COPY src ./src
+
+# Script de ejecución
+COPY docker-entrypoint-e2e.sh /docker-entrypoint-e2e.sh
+RUN chmod +x /docker-entrypoint-e2e.sh
+
+ENTRYPOINT ["/docker-entrypoint-e2e.sh"]
