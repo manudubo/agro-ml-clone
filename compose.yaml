@@ -8,14 +8,26 @@ services:
     environment:
       - DATABASE_URL=postgresql+asyncpg://postgres@postgres:5432/ml_agro
       - AGRO_ML_PROJECT_ROOT=/workspace
+      - REDIS_URL=redis://redis:6379
+      - CACHE_ENABLED=true
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-dev-secret-change-in-production}
+      - LOG_LEVEL=INFO
     command: >
-      sh -c 'until alembic -c /workspace/backend/alembic.ini upgrade head; do echo Alembic failed, retrying in 5 seconds...; sleep 5; done && python /workspace/backend/machine-learning/train_siembra_model.py && uvicorn app.main:app --host 0.0.0.0 --port 8000'
+      sh -c 'until alembic -c /workspace/backend/alembic.ini upgrade head; do echo Alembic failed, retrying in 5 seconds...; sleep 5; done && python /workspace/backend/machine-learning/train_siembra_model.py && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload'
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     volumes:
       - ./backend/api:/app
       - ./backend:/workspace/backend
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
   frontend:
     build:
@@ -25,7 +37,8 @@ services:
     ports:
       - "4200:4200"
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     environment:
       - CHOKIDAR_USEPOLLING=true
     command: >
@@ -36,12 +49,16 @@ services:
       - /app/node_modules
 
   postgres:
-    image: postgis/postgis:13-3.1
+    image: postgis/postgis:16-3.4  # Upgraded to latest stable
     environment:
       - POSTGRES_DB=ml_agro
       - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
       - POSTGRES_HOST_AUTH_METHOD=trust
+      # Performance tuning
+      - POSTGRES_SHARED_BUFFERS=256MB
+      - POSTGRES_EFFECTIVE_CACHE_SIZE=1GB
+      - POSTGRES_MAX_CONNECTIONS=100
     ports:
       - "5432:5432"
     volumes:
@@ -51,6 +68,36 @@ services:
       interval: 10s
       timeout: 5s
       retries: 6
+    command: >
+      postgres
+      -c shared_buffers=256MB
+      -c effective_cache_size=1GB
+      -c maintenance_work_mem=64MB
+      -c checkpoint_completion_target=0.9
+      -c wal_buffers=16MB
+      -c default_statistics_target=100
+      -c random_page_cost=1.1
+      -c effective_io_concurrency=200
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: >
+      redis-server
+      --appendonly yes
+      --appendfsync everysec
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
 
 volumes:
   postgres_data:
+  redis_data:
